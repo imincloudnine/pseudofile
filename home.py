@@ -2,9 +2,11 @@ import streamlit as st
 import bcrypt
 import os
 import tempfile
+from PIL import Image
 from supabase import create_client, Client
 from pypdf import PdfReader, PdfWriter
 from docx2pdf import convert as docx2pdf_convert
+from streamlit_option_menu import option_menu
 from pdf2docx import Converter
 import uuid
 from datetime import datetime
@@ -13,7 +15,7 @@ from datetime import datetime
 url = "https://kgulogjssuqxrmjfzcma.supabase.co"
 key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtndWxvZ2pzc3VxeHJtamZ6Y21hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc0NjQ0OTAsImV4cCI6MjA2MzA0MDQ5MH0.IQIDWtnLxMzmSlVH48vTjAo6tVyDaCD5sfa3LfkEjZ4"
 supabase: Client = create_client(url, key)
-
+st.set_page_config(layout="wide")
 # CSS Custom
 def inject_css():
     st.markdown("""
@@ -28,16 +30,24 @@ def inject_css():
         padding: 2.5rem 2rem;
         border-radius: 15px;
         box-shadow: 0 10px 30px rgba(0,0,0,0.05);
-        max-width: 400px;
-        margin: auto;
-        margin-top: 3rem;
+        max-width: 1000px;
+        margin: 200px;
+        margin-top: 100px;
+        margin-left: 10px;
     }
     .title {
         text-align: center;
         font-weight: 600;
         font-size: 42px;
         color: #fff;
-        margin-bottom: 5px;
+        margin-bottom: 2px;
+    }
+    .h2 {
+        text-align: center;
+        font-weight: 600;
+        font-size: 24px;
+        color: #fff;
+        margin-bottom: 5px;        
     }
     .subtitle {
         text-align: center;
@@ -209,45 +219,202 @@ def convert_file(input_path, output_path, conversion_type, user_id, email, origi
         st.error(f"Gagal konversi file: {e}")
         return False, 0
 
+def show_boxes():
+    st.markdown("""
+        <style>
+            .feature-box {
+                background-color: #f9f9f9;
+                padding: 20px;
+                border-radius: 15px;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+                text-align: center;
+                transition: transform 0.2s;
+                height: 220px;
+            }
+            .feature-box:hover {
+                transform: scale(1.02);
+                background-color: #f0f8ff;
+            }
+            .feature-icon {
+                font-size: 40px;
+                margin-bottom: 10px;
+            }
+            .feature-title {
+                font-size: 20px;
+                font-weight: bold;
+                margin-bottom: 8px;
+                color: #000;
+            }
+            .feature-desc {
+                font-size: 14px;
+                color: #666;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("""
+            <div class="feature-box">
+                <div class="feature-icon">🧩</div>
+                <div class="feature-title">Gabungkan PDF</div>
+                <div class="feature-desc">Satukan beberapa file PDF menjadi satu dokumen.</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("""
+            <div class="feature-box">
+                <div class="feature-icon">🔄</div>
+                <div class="feature-title">Konversi File</div>
+                <div class="feature-desc">Ubah file dari Word, PPT, gambar ke PDF, dan sebaliknya.</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown("""
+            <div class="feature-box">
+                <div class="feature-icon">📉</div>
+                <div class="feature-title">Kompres PDF</div>
+                <div class="feature-desc">Perkecil ukuran file PDF tanpa mengurangi kualitas.</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+def show_landing_page():
+    # Tambahkan CSS untuk styling navbar
+    st.markdown("""
+    <style>
+        /* Biarkan menu penuh lebar */
+        .css-1r6slb0.e1tzin5v0 {
+            width: 100% !important;
+        }
+        /* Posisikan navbar di paling atas */
+        .stApp {
+            margin-top: -50px; /* Naikkan margin biar nempel */
+        }
+        /* Gaya tambahan untuk menu agar lebih lebar */
+        .css-10trblm.e16nr0p30 {
+            width: 100% !important;
+        }
+
+        /* Tambahan opsional: box menu jadi transparan */
+        .css-1r6slb0.e1tzin5v0 {
+            background-color: rgba(0,0,0,0);
+            padding: 0;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Navbar horizontal di atas
+    
+    with st.container():
+        selected = option_menu(
+            menu_title=None,
+            options=["Home", "Login/Register"],
+            icons=["house", "box-arrow-right"],
+            orientation="horizontal",
+            default_index=0,
+            styles={
+                "container": {"padding": "10px", "background-color": "#fafafa"},
+                "nav-link": {
+                    "font-size": "12px",
+                    "color": "black",
+                    "text-align": "center",
+                    "margin": "0px 10px",
+                },
+                "nav-link-selected": {
+                    "background-color": "#d0e8ff",
+                    "color": "black",
+                },
+            }
+        )
+
+    if selected == "Home":
+        show_hero()
+        show_boxes()
+    elif selected == "Login/Register":
+        show_login_page()
+
+def show_hero():
+    st.markdown('<div class="title">Pseudofile</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subtitle">your PDF worker in overtime</div>', unsafe_allow_html=True)
+
 def show_dashboard():
-    st.markdown('<div class="title">Welcome!</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="subtitle">Hello, {st.session_state.user_nama} 👋</div>', unsafe_allow_html=True)
+    # Tambahkan CSS untuk styling navbar
+    st.markdown("""
+    <style>
+        /* Biarkan menu penuh lebar */
+        .css-1r6slb0.e1tzin5v0 {
+            width: 100% !important;
+        }
+        /* Posisikan navbar di paling atas */
+        .stApp {
+            margin-top: -50px; /* Naikkan margin biar nempel */
+        }
+        /* Gaya tambahan untuk menu agar lebih lebar */
+        .css-10trblm.e16nr0p30 {
+            width: 100% !important;
+        }
 
-    # Sidebar menu
-    menu = st.sidebar.selectbox(
-        "Menu",
-        ["Beranda", "Kompres PDF", "Gabungkan PDF", "Konversi File", "Tagihan"]
-    )
+        /* Tambahan opsional: box menu jadi transparan */
+        .css-1r6slb0.e1tzin5v0 {
+            background-color: rgba(0,0,0,0);
+            padding: 0;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
-    # Logout button in sidebar
-    if st.sidebar.button("🚪 Logout"):
+    # Navbar horizontal di atas
+    with st.container():
+        selected = option_menu(
+            menu_title=None,
+            options=["Home", "Compress PDF", "Gabungkan PDF", "Konversi File", "Tagihan", "Logout"],
+            icons=["house", "file-earmark-zip", "files", "filetype-pdf", "currency-dollar", "box-arrow-right"],
+            menu_icon="cast",
+            default_index=0,
+            orientation="horizontal",
+            styles={
+                "container": {"padding": "10px", "background-color": "#fafafa"},
+                "nav-link": {
+                    "font-size": "12px",
+                    "color": "black",
+                    "text-align": "center",
+                    "margin": "0 10px",
+                },
+                "nav-link-selected": {
+                    "background-color": "#d0e8ff",
+                    "color": "black",
+                },
+                # Tambahkan style khusus buat Logout
+                "nav-link:hover": {
+                    "color": "red",
+                },
+            }
+        )
+
+    if selected == "Home":
+        st.markdown('<div class="title">Welcome to Pseudofile!</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="subtitle">Hello, {st.session_state.user_nama} 👋! Ready to PDFs your files?</div>', unsafe_allow_html=True)
+        show_home()
+    elif selected == "Compress PDF":
+        show_compress_pdf()
+    elif selected == "Gabungkan PDF":
+        show_merge_pdf()
+    elif selected == "Konversi File":
+        show_convert_file()
+    elif selected == "Tagihan":
+        show_billing()
+    elif selected == "Logout":
         st.session_state.logged_in = False
         st.session_state.user_email = ""
         st.rerun()
 
-    if menu == "Beranda":
-        show_home()
-    elif menu == "Kompres PDF":
-        show_compress_pdf()
-    elif menu == "Gabungkan PDF":
-        show_merge_pdf()
-    elif menu == "Konversi File":
-        show_convert_file()
-    elif menu == "Tagihan":
-        show_billing()
-
 def show_home():
     st.markdown("""
-    ### Selamat Datang di Pseudofile! 🎉
-    
-    Aplikasi ini menyediakan berbagai fitur untuk mengelola file PDF dan dokumen Anda:
-    
-    - 📦 **Kompres PDF**: Mengecilkan ukuran file PDF Anda
-    - 🔄 **Gabungkan PDF**: Menggabungkan beberapa file PDF menjadi satu
-    - 📝 **Konversi File**: Mengkonversi antara format Word dan PDF
-    
-    Silakan pilih menu di sidebar untuk menggunakan fitur yang Anda inginkan.
+    ### Our features just for you 
     """)
+    show_boxes()
 
 def show_compress_pdf():
     st.markdown("### 📦 Kompres PDF")
@@ -414,34 +581,64 @@ def show_billing():
         st.warning("Anda belum login.")
 
 def show_login_page():
-    st.markdown('<div class="title">Pseudofile Login</div>', unsafe_allow_html=True)
-    st.markdown('<div class="subtitle">Silakan login atau daftar akun baru.</div>', unsafe_allow_html=True)
+    st.markdown("""
+        <style>
+            .centered-tabs .stTabs {
+                display: flex;
+                justify-content: center;
+            }
+            .input-container {
+                max-width: 300px;
+                margin: auto;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+    st.markdown('<div class="h2">Login to Pseudofile</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subtitle">Masuk atau daftar akun baru</div>', unsafe_allow_html=True)
 
-    tab1, tab2 = st.tabs(["🔐 Login", "📝 Register"])
+    left, center, right = st.columns([1, 2, 1])
+    with center:
+        with st.container():
+        # Tab login dan register
+            tab1, tab2 = st.tabs(["Login", "Register"])
 
-    with tab1:
-        st.subheader("Form Login")
-        email = st.text_input("Email", key="login_email")
-        password = st.text_input("Password", type="password", key="login_password")
-        if st.button("Login"):
-            user = login_user(email, password)
-            if user:
-                st.success("Login berhasil!")
-                st.rerun()
+            with tab1:
+                with st.container():
+                    st.markdown('<div class="input-container">', unsafe_allow_html=True)
+                    email = st.text_input("Email", key="login_email")
+                    password = st.text_input("Password", type="password", key="login_password")
+                    if st.button("Login"):
+                        user = login_user(email, password)
+                        if user:
+                            st.success("Login berhasil!")
+                            st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
 
-    with tab2:
-        st.subheader("Form Register")
-        nama = st.text_input("Nama Lengkap", key="register_nama")
-        email = st.text_input("Email", key="register_email")
-        password = st.text_input("Password", type="password", key="register_password")
-        confirm = st.text_input("Konfirmasi Password", type="password", key="register_confirm")
-        if st.button("Register"):
-            if not email or not password or not confirm:
-                st.markdown('<div class="error-alert">Semua field wajib diisi.</div>', unsafe_allow_html=True)
-            elif password != confirm:
-                st.markdown('<div class="error-alert">Password tidak cocok.</div>', unsafe_allow_html=True)
-            else:
-                register_user(email, password, nama)
+            with tab2:
+                with st.container():
+                    st.markdown('<div class="input-container">', unsafe_allow_html=True)
+                    nama = st.text_input("Nama Lengkap", key="register_nama")
+                    email = st.text_input("Email", key="register_email")
+                    password = st.text_input("Password", type="password", key="register_password")
+                    confirm = st.text_input("Konfirmasi Password", type="password", key="register_confirm")
+                    if st.button("Register"):
+                        if not email or not password or not confirm:
+                            st.markdown('<div class="error-alert">Semua field wajib diisi.</div>', unsafe_allow_html=True)
+                        elif password != confirm:
+                            st.markdown('<div class="error-alert">Password tidak cocok.</div>', unsafe_allow_html=True)
+                        else:
+                            register_user(email, password, nama)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+def powered_by():
+    st.markdown("""
+<div style='text-align: center; margin-top: 3rem; color: #888; font-size: 14px;'>
+    <img src='https://streamlit.io/images/brand/streamlit-logo-primary-colormark-darktext.png' width='100' /><br>
+    Powered by <strong>Pseudofile Team</strong><br>
+    Built with ❤️ using Streamlit and Supabase
+</div>
+""", unsafe_allow_html=True)
+
 
 def login_user(email, password):
     try:
@@ -502,7 +699,8 @@ def main():
         return
 
     # Jika belum login
-    show_login_page()
+    show_landing_page()
+    powered_by()
 
 if __name__ == "__main__":
     main()
