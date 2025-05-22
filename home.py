@@ -9,9 +9,11 @@ from docx2pdf import convert as docx2pdf_convert
 from streamlit_option_menu import option_menu
 from pdf2docx import Converter
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
+import threading
+import time
 
 # Supabase setup
 # Load dari .env
@@ -93,6 +95,192 @@ def inject_css():
     </style>
     """, unsafe_allow_html=True)
 
+# New functions for file upload logging
+def upload_file_to_storage(bucket_name, file_path, file_data):
+    """
+    Upload a file to Supabase Storage and return the public URL
+    """
+    try:
+        # Upload file to storage
+        response = supabase.storage.from_(bucket_name).upload(
+            file_path,
+            file_data,
+            {"content-type": "application/octet-stream"}
+        )
+        
+        if hasattr(response, 'error') and response.error:
+            raise Exception(f"Upload error: {response.error}")
+        
+        # Get public URL
+        public_url = supabase.storage.from_(bucket_name).get_public_url(file_path)
+        return public_url
+    except Exception as e:
+        st.error(f"Failed to upload file: {e}")
+        return None
+
+def log_file_upload(user_id, email, action, activity_type, filename, file_size_mb, file_path, public_url):
+    """
+    Log file upload to both log_user_activity and files tables
+    """
+    try:
+        # Generate a unique ID for both records
+        activity_id = str(uuid.uuid4())
+        file_id = str(uuid.uuid4())
+        timestamp = datetime.utcnow().isoformat()
+        
+        # 1. Insert into log_user_activity table
+        activity_payload = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "email": email,
+            "action": action,
+            "activity_type": activity_type,
+            "filename": filename,
+            "file_size_mb": round(file_size_mb, 2),
+            "timestamp": datetime.utcnow().isoformat()
+}
+        
+        activity_response = supabase.table("log_user_activity").insert(activity_payload).execute()
+        
+        # 2. Insert into files table - ensure filesize is a float/numeric value
+        file_payload = {
+            "id": file_id,
+            "user_id": user_id,
+            "filename": filename,
+            "filesize": float(file_size_mb),  # Explicitly convert to float
+            "file_path": file_path,
+            "public_url": public_url,
+            "uploaded_at": timestamp
+        }
+        
+        file_response = supabase.table("files").insert(file_payload).execute()
+        
+        return activity_response.data is not None and file_response.data is not None
+    except Exception as e:
+        st.error(f"Failed to log file upload: {e}")
+        return False
+
+def handle_file_upload(uploaded_file, user_id, email, action_type):
+    """
+    Handle file upload, storage, and logging
+    """
+    try:
+        # Calculate file size in MB
+        file_size_mb = len(uploaded_file.getvalue()) / (1024 * 1024)
+        
+        # Create a unique file path
+        file_path = f"{user_id}/{uuid.uuid4()}_{uploaded_file.name}"
+        
+        # Upload to storage - using "files" bucket as specified
+        public_url = upload_file_to_storage(
+            bucket_name="files",  # Updated bucket name
+            file_path=file_path,
+            file_data=uploaded_file.getvalue()
+        )
+        
+        if not public_url:
+            return False, None
+            
+        # Log the file upload
+        success = log_file_upload(
+            user_id=user_id,
+            email=email,
+            action=action_type,
+            activity_type="file_operation",
+            filename=uploaded_file.name,
+            file_size_mb=file_size_mb,
+            file_path=file_path,
+            public_url=public_url
+        )
+        
+        return success, public_url
+    except Exception as e:
+        st.error(f"Failed to handle file upload: {e}")
+        return False, None
+def cleanup_old_files():
+    """
+    Clean up files older than one minute
+    """
+    try:
+        # Calculate timestamp for one minute ago
+        one_minute_ago = (datetime.utcnow() - timedelta(minutes=1)).isoformat()
+        
+        # Get files older than one minute
+        response = supabase.table("files").select("*").lt("uploaded_at", one_minute_ago).execute()
+        
+        if not response.data:
+            return True  # No files to clean up
+            
+        for file in response.data:
+            # 1. Delete from storage
+            bucket_name = "files"  # Updated bucket name
+            file_path = file["file_path"]
+            
+            supabase.storage.from_(bucket_name).remove([file_path])
+            
+            # 2. Update log_user_activity to remove file reference
+            supabase.table("log_user_activity").update({"filename": "deleted_file"}).eq("user_id", file["user_id"]).eq("filename", os.path.basename(file_path)).execute()
+            
+            # 3. Delete from files table
+            supabase.table("files").delete().eq("id", file["id"]).execute()
+            
+        return True
+    except Exception as e:
+        st.error(f"Failed to clean up old files: {e}")
+        return False
+
+def handle_file_upload(uploaded_file, user_id, email, action_type):
+    """
+    Handle file upload, storage, and logging
+    """
+    try:
+        # Calculate file size in MB
+        file_size_mb = len(uploaded_file.getvalue()) / (1024 * 1024)
+        
+        # Create a unique file path
+        file_path = f"{user_id}/{uuid.uuid4()}_{uploaded_file.name}"
+        
+        # Upload to storage
+        public_url = upload_file_to_storage(
+            bucket_name="files",  # Replace with your bucket name
+            file_path=file_path,
+            file_data=uploaded_file.getvalue()
+        )
+        
+        if not public_url:
+            return False, None
+            
+        # Log the file upload
+        success = log_file_upload(
+            user_id=user_id,
+            email=email,
+            action=action_type,
+            activity_type="file_operation",
+            filename=uploaded_file.name,
+            file_size_mb=file_size_mb,
+            file_path=file_path,
+            public_url=public_url
+        )
+        
+        return success, public_url
+    except Exception as e:
+        st.error(f"Failed to handle file upload: {e}")
+        return False, None
+
+def setup_cleanup_job():
+    """
+    Set up a background thread to clean up old files
+    """
+    def cleanup_job():
+        while True:
+            cleanup_old_files()
+            time.sleep(60)  # Run every minute
+    
+    # Start the cleanup thread
+    cleanup_thread = threading.Thread(target=cleanup_job, daemon=True)
+    cleanup_thread.start()
+
+# Original functions with modifications for file logging
 def log_user_activity(
     user_id: str,
     email: str,
@@ -431,6 +619,18 @@ def show_compress_pdf():
     uploaded_file = st.file_uploader("Unggah file PDF", type="pdf")
     if uploaded_file is not None:
         if st.button("Kompres PDF"):
+            # First, handle the file upload and logging
+            upload_success, public_url = handle_file_upload(
+                uploaded_file=uploaded_file,
+                user_id=st.session_state.user_id,
+                email=st.session_state.user_email,
+                action_type="upload_for_compression"
+            )
+            
+            if not upload_success:
+                st.error("Gagal mengunggah file")
+                return
+                
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_input:
                 tmp_input.write(uploaded_file.read())
                 tmp_input_path = tmp_input.name
@@ -471,6 +671,19 @@ def show_merge_pdf():
     
     if uploaded_files and len(uploaded_files) >= 2:
         if st.button("Gabungkan PDF"):
+            # Log each file upload
+            for uploaded_file in uploaded_files:
+                upload_success, _ = handle_file_upload(
+                    uploaded_file=uploaded_file,
+                    user_id=st.session_state.user_id,
+                    email=st.session_state.user_email,
+                    action_type="upload_for_merge"
+                )
+                
+                if not upload_success:
+                    st.error(f"Gagal mengunggah file: {uploaded_file.name}")
+                    return
+            
             with tempfile.TemporaryDirectory() as temp_dir:
                 output_path = os.path.join(temp_dir, "merged.pdf")
                 
@@ -507,6 +720,18 @@ def show_convert_file():
     if conversion_type == "Word ke PDF":
         uploaded_file = st.file_uploader("Unggah file Word (.docx)", type=["docx"])
         if uploaded_file and st.button("Konversi ke PDF"):
+            # Log file upload
+            upload_success, _ = handle_file_upload(
+                uploaded_file=uploaded_file,
+                user_id=st.session_state.user_id,
+                email=st.session_state.user_email,
+                action_type="upload_for_word_to_pdf"
+            )
+            
+            if not upload_success:
+                st.error("Gagal mengunggah file")
+                return
+                
             with tempfile.TemporaryDirectory() as tmpdir:
                 input_path = os.path.join(tmpdir, "input.docx")
                 output_path = os.path.join(tmpdir, "output.pdf")
@@ -536,6 +761,18 @@ def show_convert_file():
     else:
         uploaded_file = st.file_uploader("Unggah file PDF", type=["pdf"])
         if uploaded_file and st.button("Konversi ke Word"):
+            # Log file upload
+            upload_success, _ = handle_file_upload(
+                uploaded_file=uploaded_file,
+                user_id=st.session_state.user_id,
+                email=st.session_state.user_email,
+                action_type="upload_for_pdf_to_word"
+            )
+            
+            if not upload_success:
+                st.error("Gagal mengunggah file")
+                return
+                
             with tempfile.TemporaryDirectory() as tmpdir:
                 input_path = os.path.join(tmpdir, "input.pdf")
                 output_path = os.path.join(tmpdir, "output.docx")
@@ -597,11 +834,36 @@ def show_billing():
             font-weight: bold;
             color: #000;
         }
+        .alert-warning {
+            background-color: #fff3cd;
+            color: #856404;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: 500;
+            margin-bottom: 16px;
+            border: 1px solid #ffeeba;
+        }
+        .download-btn {
+            background-color: #4fc3f7;
+            color: white;
+            border-radius: 8px;
+            padding: 6px 12px;
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .download-btn:hover {
+            background-color: #29b6f6;
+        }
     </style>
     """, unsafe_allow_html=True)
 
+    import pandas as pd
+
     user_email = st.session_state.get("user_email")
     if user_email:
+        # Get billing data from log_user_activity
         billing_response = supabase.table("log_user_activity") \
             .select("timestamp, action, filename, file_size_mb, result_file_size_mb, billing_amount") \
             .eq("email", user_email) \
@@ -609,6 +871,31 @@ def show_billing():
             .execute()
 
         billing_data = billing_response.data
+        
+        # Get file upload data from files table
+        files_response = supabase.table("files") \
+            .select("*") \
+            .eq("user_id", st.session_state.user_id) \
+            .order("uploaded_at", desc=True) \
+            .execute()
+            
+        files_data = files_response.data
+
+        # Check if there are unpaid bills older than 1 minute
+        unpaid_expired = False
+        if billing_data:
+            df_billing = pd.DataFrame(billing_data)
+            df_billing["timestamp"] = pd.to_datetime(df_billing["timestamp"])
+            now = pd.Timestamp.now(tz=None)
+            # If any billing record is older than 1 minute and billing_amount > 0
+            if ((now - df_billing["timestamp"]).dt.total_seconds() > 60).any() and df_billing["billing_amount"].sum() > 0:
+                unpaid_expired = True
+
+        if unpaid_expired:
+            st.markdown(
+                '<div class="alert-warning">⚠️ Riwayat Anda akan segera dihapus jika tidak segera membayar tagihan!</div>',
+                unsafe_allow_html=True
+            )
 
         if billing_data:
             total_tagihan = sum(item.get("billing_amount", 0) or 0 for item in billing_data)
@@ -625,7 +912,6 @@ def show_billing():
             """, unsafe_allow_html=True)
 
             # Ubah nama kolom agar lebih ramah
-            import pandas as pd
             df = pd.DataFrame(billing_data)
             # Format tanggal saja dari timestamp
             df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.date
@@ -641,6 +927,43 @@ def show_billing():
 
             st.caption("Riwayat tagihan Anda")
             st.dataframe(df, use_container_width=True)
+            
+            # Display uploaded files with download action
+            if files_data:
+                st.markdown("### 📁 File Terunggah")
+                st.caption("File yang telah Anda unggah (akan dihapus setelah 1 menit)")
+
+                files_df = pd.DataFrame(files_data)
+                files_df["uploaded_at"] = pd.to_datetime(files_df["uploaded_at"])
+                files_df["time_remaining"] = (files_df["uploaded_at"] + pd.Timedelta(minutes=1) - pd.Timestamp.now()).dt.total_seconds()
+                files_df["time_remaining"] = files_df["time_remaining"].apply(lambda x: max(0, int(x)))
+
+                # Display table with download action
+                display_cols = ["Nama File", "Ukuran (MB)", "Waktu Unggah", "Waktu Tersisa (detik)", "Aksi"]
+                files_df = files_df.rename(columns={
+                    "filename": "Nama File",
+                    "filesize": "Ukuran (MB)",
+                    "uploaded_at": "Waktu Unggah",
+                    "time_remaining": "Waktu Tersisa (detik)",
+                    "public_url": "Public URL"
+                })
+
+                # Build table with download buttons
+                from io import BytesIO
+                for idx, row in files_df.iterrows():
+                    col1, col2, col3, col4, col5 = st.columns([3, 2, 3, 2, 2])
+                    col1.write(row["Nama File"])
+                    col2.write(f"{row['Ukuran (MB)']:.2f}")
+                    col3.write(row["Waktu Unggah"])
+                    col4.write(row["Waktu Tersisa (detik)"])
+                    if row.get("Public URL"):
+                        with col5:
+                            st.markdown(
+                                f"<a href='{row['Public URL']}' download class='download-btn'>Download</a>",
+                                unsafe_allow_html=True
+                            )
+                # Optionally, show as a dataframe without the download column
+                # st.dataframe(files_df[["Nama File", "Ukuran (MB)", "Waktu Unggah", "Waktu Tersisa (detik)"]], use_container_width=True)
         else:
             st.info("Belum ada aktivitas dari Anda")
     else:
@@ -754,6 +1077,9 @@ def register_user(email, password, nama):
 
 def main():
     inject_css()
+    
+    # Setup cleanup job
+    setup_cleanup_job()
 
     # Setup session state
     if "logged_in" not in st.session_state:
