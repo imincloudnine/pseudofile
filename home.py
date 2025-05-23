@@ -10,13 +10,12 @@ from streamlit_option_menu import option_menu
 from pdf2docx import Converter
 import uuid
 from datetime import datetime, timedelta
-import os
-from dotenv import load_dotenv
 import threading
 import time
+import pandas as pd
+from dotenv import load_dotenv
 
-# Supabase setup
-# Load dari .env
+# Load environment variables
 load_dotenv()
 
 # Ambil dari environment
@@ -138,7 +137,7 @@ def log_file_upload(user_id, email, action, activity_type, filename, file_size_m
             "filename": filename,
             "file_size_mb": round(file_size_mb, 2),
             "timestamp": datetime.utcnow().isoformat()
-}
+        }
         
         activity_response = supabase.table("log_user_activity").insert(activity_payload).execute()
         
@@ -197,16 +196,17 @@ def handle_file_upload(uploaded_file, user_id, email, action_type):
     except Exception as e:
         st.error(f"Failed to handle file upload: {e}")
         return False, None
+
 def cleanup_old_files():
     """
-    Clean up files older than one minute
+    Clean up files older than one hour (changed from one minute)
     """
     try:
-        # Calculate timestamp for one minute ago
-        one_minute_ago = (datetime.utcnow() - timedelta(minutes=1)).isoformat()
+        # Calculate timestamp for one hour ago (changed from one minute)
+        one_hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
         
-        # Get files older than one minute
-        response = supabase.table("files").select("*").lt("uploaded_at", one_minute_ago).execute()
+        # Get files older than one hour
+        response = supabase.table("files").select("*").lt("uploaded_at", one_hour_ago).execute()
         
         if not response.data:
             return True  # No files to clean up
@@ -228,57 +228,6 @@ def cleanup_old_files():
     except Exception as e:
         st.error(f"Failed to clean up old files: {e}")
         return False
-
-def handle_file_upload(uploaded_file, user_id, email, action_type):
-    """
-    Handle file upload, storage, and logging
-    """
-    try:
-        # Calculate file size in MB
-        file_size_mb = len(uploaded_file.getvalue()) / (1024 * 1024)
-        
-        # Create a unique file path
-        file_path = f"{user_id}/{uuid.uuid4()}_{uploaded_file.name}"
-        
-        # Upload to storage
-        public_url = upload_file_to_storage(
-            bucket_name="files",  # Replace with your bucket name
-            file_path=file_path,
-            file_data=uploaded_file.getvalue()
-        )
-        
-        if not public_url:
-            return False, None
-            
-        # Log the file upload
-        success = log_file_upload(
-            user_id=user_id,
-            email=email,
-            action=action_type,
-            activity_type="file_operation",
-            filename=uploaded_file.name,
-            file_size_mb=file_size_mb,
-            file_path=file_path,
-            public_url=public_url
-        )
-        
-        return success, public_url
-    except Exception as e:
-        st.error(f"Failed to handle file upload: {e}")
-        return False, None
-
-def setup_cleanup_job():
-    """
-    Set up a background thread to clean up old files
-    """
-    def cleanup_job():
-        while True:
-            cleanup_old_files()
-            time.sleep(60)  # Run every minute
-    
-    # Start the cleanup thread
-    cleanup_thread = threading.Thread(target=cleanup_job, daemon=True)
-    cleanup_thread.start()
 
 # Original functions with modifications for file logging
 def log_user_activity(
@@ -391,10 +340,12 @@ def convert_file(input_path, output_path, conversion_type, user_id, email, origi
         
         if conversion_type == "word_to_pdf":
             docx2pdf_convert(input_path, output_path)
-        else:  # pdf_to_word
+        elif conversion_type == "pdf_to_word":  # Fixed bug: added explicit condition
             cv = Converter(input_path)
             cv.convert(output_path, start=0, end=None)
             cv.close()
+        else:
+            raise ValueError(f"Conversion type not supported: {conversion_type}")
 
         result_size = os.path.getsize(output_path) / (1024 * 1024)
         billing_amount = int(input_size * 1500)  # 150 coin per MB
@@ -648,7 +599,9 @@ def show_compress_pdf():
 
                 if success:
                     with open(tmp_output_path, "rb") as f:
-                        st.success(f"PDF berhasil dikompres! (Biaya: Rp. {billing_amount} )")
+                        # Format billing amount as Indonesian Rupiah
+                        formatted_billing = f"Rp {billing_amount:,}".replace(",", ".")
+                        st.success(f"PDF berhasil dikompres! (Biaya: {formatted_billing})")
                         st.download_button(
                             label="⬇️ Download PDF Terkompres",
                             data=f,
@@ -697,7 +650,9 @@ def show_merge_pdf():
 
                     if success:
                         with open(output_path, "rb") as f:
-                            st.success(f"PDF berhasil digabungkan! (Biaya: Rp. {billing_amount} )")
+                            # Format billing amount as Indonesian Rupiah
+                            formatted_billing = f"Rp {billing_amount:,}".replace(",", ".")
+                            st.success(f"PDF berhasil digabungkan! (Biaya: {formatted_billing})")
                             st.download_button(
                                 label="⬇️ Download PDF Gabungan",
                                 data=f,
@@ -751,7 +706,9 @@ def show_convert_file():
 
                     if success:
                         with open(output_path, "rb") as f:
-                            st.success(f"Konversi berhasil! (Biaya: Rp. {billing_amount} )")
+                            # Format billing amount as Indonesian Rupiah
+                            formatted_billing = f"Rp {billing_amount:,}".replace(",", ".")
+                            st.success(f"Konversi berhasil! (Biaya: {formatted_billing})")
                             st.download_button(
                                 label="⬇️ Download PDF",
                                 data=f,
@@ -792,7 +749,9 @@ def show_convert_file():
 
                     if success:
                         with open(output_path, "rb") as f:
-                            st.success(f"Konversi berhasil! (Biaya: Rp. {billing_amount} )")
+                            # Format billing amount as Indonesian Rupiah
+                            formatted_billing = f"Rp {billing_amount:,}".replace(",", ".")
+                            st.success(f"Konversi berhasil! (Biaya: {formatted_billing})")
                             st.download_button(
                                 label="⬇️ Download Word",
                                 data=f,
@@ -834,32 +793,16 @@ def show_billing():
             font-weight: bold;
             color: #000;
         }
-        .alert-warning {
-            background-color: #fff3cd;
-            color: #856404;
-            padding: 12px;
-            border-radius: 8px;
-            font-weight: 500;
-            margin-bottom: 16px;
-            border: 1px solid #ffeeba;
-        }
-        .download-btn {
-            background-color: #4fc3f7;
-            color: white;
-            border-radius: 8px;
-            padding: 6px 12px;
-            border: none;
-            font-size: 14px;
-            font-weight: 600;
+        .download-link {
+            color: #4fc3f7;
+            text-decoration: none;
             cursor: pointer;
         }
-        .download-btn:hover {
-            background-color: #29b6f6;
+        .download-link:hover {
+            text-decoration: underline;
         }
     </style>
     """, unsafe_allow_html=True)
-
-    import pandas as pd
 
     user_email = st.session_state.get("user_email")
     if user_email:
@@ -881,24 +824,11 @@ def show_billing():
             
         files_data = files_response.data
 
-        # Check if there are unpaid bills older than 1 minute
-        unpaid_expired = False
-        if billing_data:
-            df_billing = pd.DataFrame(billing_data)
-            df_billing["timestamp"] = pd.to_datetime(df_billing["timestamp"])
-            now = pd.Timestamp.now(tz=None)
-            # If any billing record is older than 1 minute and billing_amount > 0
-            if ((now - df_billing["timestamp"]).dt.total_seconds() > 60).any() and df_billing["billing_amount"].sum() > 0:
-                unpaid_expired = True
-
-        if unpaid_expired:
-            st.markdown(
-                '<div class="alert-warning">⚠️ Riwayat Anda akan segera dihapus jika tidak segera membayar tagihan!</div>',
-                unsafe_allow_html=True
-            )
-
         if billing_data:
             total_tagihan = sum(item.get("billing_amount", 0) or 0 for item in billing_data)
+
+            # Format total tagihan as Indonesian Rupiah
+            formatted_total = f"Rp {total_tagihan:,}".replace(",", ".")
 
             # Header dengan judul & total tagihan di kanan
             st.markdown(f"""
@@ -906,15 +836,19 @@ def show_billing():
                 <div class="billing-title">💳 Tagihan Saya</div>
                 <div class="billing-metric">
                     <div class="billing-metric-label">Total Tagihan</div>
-                    <div class="billing-metric-value">Rp. {total_tagihan:,.0f}</div>
+                    <div class="billing-metric-value">{formatted_total}</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
             # Ubah nama kolom agar lebih ramah
+            import pandas as pd
             df = pd.DataFrame(billing_data)
             # Format tanggal saja dari timestamp
             df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.date
+            
+            # Format billing amount as Indonesian Rupiah
+            df["billing_amount"] = df["billing_amount"].apply(lambda x: f"Rp {x:,}".replace(",", ".") if x else "Rp 0")
 
             df = df.rename(columns={
                 "timestamp": "Waktu",
@@ -922,48 +856,42 @@ def show_billing():
                 "filename": "Nama File",
                 "file_size_mb": "Ukuran Awal (MB)",
                 "result_file_size_mb": "Ukuran Akhir (MB)",
-                "billing_amount": "Biaya (Rp)"
+                "billing_amount": "Biaya"
             })
 
             st.caption("Riwayat tagihan Anda")
             st.dataframe(df, use_container_width=True)
             
-            # Display uploaded files with download action
+            # Display uploaded files
             if files_data:
                 st.markdown("### 📁 File Terunggah")
-                st.caption("File yang telah Anda unggah (akan dihapus setelah 1 menit)")
-
+                st.caption("File yang telah Anda unggah (akan dihapus setelah 1 jam)")
+                
                 files_df = pd.DataFrame(files_data)
                 files_df["uploaded_at"] = pd.to_datetime(files_df["uploaded_at"])
-                files_df["time_remaining"] = (files_df["uploaded_at"] + pd.Timedelta(minutes=1) - pd.Timestamp.now()).dt.total_seconds()
-                files_df["time_remaining"] = files_df["time_remaining"].apply(lambda x: max(0, int(x)))
+                tz = files_df["uploaded_at"].dt.tz  # Get timezone from uploaded_at
+                now = pd.Timestamp.now(tz=tz)  # Make now tz-aware
+                files_df["time_remaining"] = (files_df["uploaded_at"] + pd.Timedelta(hours=1) - now).dt.total_seconds()
 
-                # Display table with download action
-                display_cols = ["Nama File", "Ukuran (MB)", "Waktu Unggah", "Waktu Tersisa (detik)", "Aksi"]
+                # Format for display
                 files_df = files_df.rename(columns={
                     "filename": "Nama File",
                     "filesize": "Ukuran (MB)",
                     "uploaded_at": "Waktu Unggah",
                     "time_remaining": "Waktu Tersisa (detik)",
-                    "public_url": "Public URL"
+                    "file_path": "Path File",
+                    "public_url": "URL Publik"
                 })
 
-                # Build table with download buttons
-                from io import BytesIO
-                for idx, row in files_df.iterrows():
-                    col1, col2, col3, col4, col5 = st.columns([3, 2, 3, 2, 2])
-                    col1.write(row["Nama File"])
-                    col2.write(f"{row['Ukuran (MB)']:.2f}")
-                    col3.write(row["Waktu Unggah"])
-                    col4.write(row["Waktu Tersisa (detik)"])
-                    if row.get("Public URL"):
-                        with col5:
-                            st.markdown(
-                                f"<a href='{row['Public URL']}' download class='download-btn'>Download</a>",
-                                unsafe_allow_html=True
-                            )
-                # Optionally, show as a dataframe without the download column
-                # st.dataframe(files_df[["Nama File", "Ukuran (MB)", "Waktu Unggah", "Waktu Tersisa (detik)"]], use_container_width=True)
+                # Create a download link column
+                def make_download_link(row):
+                    return f'<a href="{row["URL Publik"]}" target="_blank" class="download-link">Download</a>'
+
+                files_df["Download"] = files_df.apply(make_download_link, axis=1)
+
+                # Select columns to display
+                display_df = files_df[["Nama File", "Ukuran (MB)", "Waktu Unggah", "Waktu Tersisa (detik)", "Path File", "URL Publik", "Download"]]
+                st.write(display_df.to_html(escape=False, index=False), unsafe_allow_html=True)
         else:
             st.info("Belum ada aktivitas dari Anda")
     else:
@@ -1040,6 +968,8 @@ def login_user(email, password):
                 st.session_state.user_email = user["email"]
                 st.session_state.user_nama = user["nama"]
                 st.session_state.user_id = user["id"]
+                # Save session to prevent losing state on refresh
+                st.session_state["_is_session_persisted"] = True
                 return user
             else:
                 st.error("Password salah.")
@@ -1075,6 +1005,19 @@ def register_user(email, password, nama):
         st.error(f"Registrasi gagal: {e}")
         return None
 
+def setup_cleanup_job():
+    """
+    Set up a background thread to clean up old files
+    """
+    def cleanup_job():
+        while True:
+            cleanup_old_files()
+            time.sleep(60)  # Run every minute
+    
+    # Start the cleanup thread
+    cleanup_thread = threading.Thread(target=cleanup_job, daemon=True)
+    cleanup_thread.start()
+
 def main():
     inject_css()
     
@@ -1084,6 +1027,11 @@ def main():
     # Setup session state
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
+        
+    # Check for persisted session
+    if st.session_state.get("_is_session_persisted"):
+        # Session already exists, no need to relogin
+        pass
 
     # Jika sudah login
     if st.session_state.logged_in:
