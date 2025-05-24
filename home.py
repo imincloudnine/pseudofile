@@ -344,6 +344,11 @@ def convert_file(input_path, output_path, conversion_type, user_id, email, origi
             cv = Converter(input_path)
             cv.convert(output_path, start=0, end=None)
             cv.close()
+        elif conversion_type == "image_to_pdf":
+            image = Image.open(input_path)
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            image.save(output_path, "PDF", resolution=100.0)
         else:
             raise ValueError(f"Conversion type not supported: {conversion_type}")
 
@@ -415,7 +420,7 @@ def show_boxes():
             <div class="feature-box">
                 <div class="feature-icon">🔄</div>
                 <div class="feature-title">Konversi File</div>
-                <div class="feature-desc">Ubah file dari Word, PPT, gambar ke PDF, dan sebaliknya.</div>
+                <div class="feature-desc">Ubah file dari Word atau gambar ke PDF.</div>
             </div>
         """, unsafe_allow_html=True)
 
@@ -516,8 +521,8 @@ def show_dashboard():
     with st.container():
         selected = option_menu(
             menu_title=None,
-            options=["Home", "Compress PDF", "Gabungkan PDF", "Konversi File", "Tagihan", "Logout"],
-            icons=["house", "file-earmark-zip", "files", "filetype-pdf", "currency-dollar", "box-arrow-right"],
+            options=["Home", "Compress PDF", "Gabungkan PDF", "Konversi File", "Tagihan", "File saya", "Logout"],
+            icons=["house", "file-earmark-zip", "files", "filetype-pdf", "currency-dollar", "folder2" ,"box-arrow-right"],
             menu_icon="cast",
             default_index=0,
             orientation="horizontal",
@@ -552,6 +557,8 @@ def show_dashboard():
         show_convert_file()
     elif selected == "Tagihan":
         show_billing()
+    elif selected == "File saya":
+        show_uploaded_files()
     elif selected == "Logout":
         st.session_state.logged_in = False
         st.session_state.user_email = ""
@@ -668,7 +675,7 @@ def show_convert_file():
     
     conversion_type = st.radio(
         "Jenis Konversi",
-        ["Word ke PDF", "PDF ke Word"],
+        ["Word ke PDF", "PDF ke Word", "Image ke PDF"],
         horizontal=True
     )
     
@@ -715,7 +722,7 @@ def show_convert_file():
                                 file_name="converted.pdf",
                                 mime="application/pdf"
                             )
-    else:
+    elif conversion_type == "PDF ke Word":
         uploaded_file = st.file_uploader("Unggah file PDF", type=["pdf"])
         if uploaded_file and st.button("Konversi ke Word"):
             # Log file upload
@@ -757,6 +764,49 @@ def show_convert_file():
                                 data=f,
                                 file_name="converted.docx",
                                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            )
+    else: # Image to PDF
+        uploaded_file = st.file_uploader("Unggah file gambar", type=["jpg", "jpeg", "png"])
+        if uploaded_file and st.button("Konversi ke PDF"):
+            # Log file upload
+            upload_success, _ = handle_file_upload(
+                uploaded_file=uploaded_file,
+                user_id=st.session_state.user_id,
+                email=st.session_state.user_email,
+                action_type="upload_for_image_to_pdf"
+            )
+            
+            if not upload_success:
+                st.error("Gagal mengunggah file")
+                return
+                
+            with tempfile.TemporaryDirectory() as tmpdir:
+                input_path = os.path.join(tmpdir, "input.jpg")
+                output_path = os.path.join(tmpdir, "output.pdf")
+
+                with open(input_path, "wb") as f:
+                    f.write(uploaded_file.read())
+
+                with st.spinner("Mengonversi..."):
+                    success, billing_amount = convert_file(
+                        input_path=input_path,
+                        output_path=output_path,
+                        conversion_type="image_to_pdf",
+                        user_id=st.session_state.user_id,
+                        email=st.session_state.user_email,
+                        original_filename=uploaded_file.name
+                    )
+
+                    if success:
+                        with open(output_path, "rb") as f:
+                            # Format billing amount as Indonesian Rupiah
+                            formatted_billing = f"Rp {billing_amount:,}".replace(",", ".")
+                            st.success(f"Konversi berhasil! (Biaya: {formatted_billing})")
+                            st.download_button(
+                                label="⬇️ Download PDF",
+                                data=f,
+                                file_name="converted.pdf",
+                                mime="application/pdf"
                             )
 
 def show_billing():
@@ -861,9 +911,48 @@ def show_billing():
 
             st.caption("Riwayat tagihan Anda")
             st.dataframe(df, use_container_width=True)
+        else:
+            st.info("Belum ada aktivitas dari Anda")
+    else:
+        st.warning("Anda belum login")
+
+# Menampilkan file yang diunggah
+def show_uploaded_files():
+    st.markdown("""
+    <style>
+        .download-link {
+            color: #4fc3f7;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .download-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    user_email = st.session_state.get("user_email")
+    if user_email:
+        # Get billing data from log_user_activity
+        billing_response = supabase.table("log_user_activity") \
+            .select("timestamp, action, filename, file_size_mb, result_file_size_mb, billing_amount") \
+            .eq("email", user_email) \
+            .order("timestamp", desc=True) \
+            .execute()
+
+        billing_data = billing_response.data
+        
+        # Get file upload data from files table
+        files_response = supabase.table("files") \
+            .select("*") \
+            .eq("user_id", st.session_state.user_id) \
+            .order("uploaded_at", desc=True) \
+            .execute()
+            
+        files_data = files_response.data
             
             # Display uploaded files
-            if files_data:
+        if files_data:
                 st.markdown("### 📁 File Terunggah")
                 st.caption("File yang telah Anda unggah (akan dihapus setelah 1 jam)")
                 
@@ -893,9 +982,7 @@ def show_billing():
                 display_df = files_df[["Nama File", "Ukuran (MB)", "Waktu Unggah", "Waktu Tersisa (detik)", "Path File", "URL Publik", "Download"]]
                 st.write(display_df.to_html(escape=False, index=False), unsafe_allow_html=True)
         else:
-            st.info("Belum ada aktivitas dari Anda")
-    else:
-        st.warning("Anda belum login")
+            st.info("File expired atau belum ada file yang diunggah.")
 
 def show_login_page():
     st.markdown("""
