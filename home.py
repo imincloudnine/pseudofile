@@ -944,7 +944,7 @@ def show_uploaded_files():
         st.info("File expired atau belum ada file yang diunggah.")
         return
 
-    st.markdown("### 📁 Histori File Anda") # Judul disesuaikan
+    st.markdown("### 📁 File Terunggah") # Judul disesuaikan
             
     files_df = pd.DataFrame(files_data)
 
