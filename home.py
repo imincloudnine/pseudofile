@@ -911,42 +911,118 @@ def show_billing():
 
             st.caption("Riwayat tagihan Anda")
             st.dataframe(df, use_container_width=True)
-            
-            # Display uploaded files
-            if files_data:
-                st.markdown("### 📁 File Terunggah")
-                st.caption("File yang telah Anda unggah (akan dihapus setelah 1 jam)")
-                
-                files_df = pd.DataFrame(files_data)
-                files_df["uploaded_at"] = pd.to_datetime(files_df["uploaded_at"])
-                tz = files_df["uploaded_at"].dt.tz  # Get timezone from uploaded_at
-                now = pd.Timestamp.now(tz=tz)  # Make now tz-aware
-                files_df["time_remaining"] = (files_df["uploaded_at"] + pd.Timedelta(hours=1) - now).dt.total_seconds()
-
-                # Format for display
-                files_df = files_df.rename(columns={
-                    "filename": "Nama File",
-                    "filesize": "Ukuran (MB)",
-                    "uploaded_at": "Waktu Unggah",
-                    "time_remaining": "Waktu Tersisa (detik)",
-                    "file_path": "Path File",
-                    "public_url": "URL Publik"
-                })
-
-                # Create a download link column
-                def make_download_link(row):
-                    return f'<a href="{row["URL Publik"]}" target="_blank" class="download-link">Download</a>'
-
-    files_df["Download"] = files_df.apply(make_download_link, axis=1)
-
-                # Select columns to display
-                display_df = files_df[["Nama File", "Ukuran (MB)", "Waktu Unggah", "Waktu Tersisa (detik)", "Path File", "URL Publik", "Download"]]
-                st.write(display_df.to_html(escape=False, index=False), unsafe_allow_html=True)
         else:
             st.info("Belum ada aktivitas dari Anda")
     else:
         st.warning("Anda belum login")
 
+def show_uploaded_files():
+    user_email = st.session_state.get("user_email")
+    if not user_email: # Pastikan user sudah login
+        st.warning("Anda belum login. Silakan login untuk melihat file Anda.")
+        return
+
+    user_id = st.session_state.get("user_id")
+    if not user_id:
+        st.error("User ID tidak ditemukan. Tidak dapat mengambil file.")
+        return
+
+    try:
+        # Ambil hanya kolom yang benar-benar dibutuhkan dari tabel 'files'
+        files_response = supabase.table("files") \
+            .select("filename, filesize, uploaded_at, public_url") \
+            .eq("user_id", user_id) \
+            .order("uploaded_at", desc=True) \
+            .execute()
+    except Exception as e:
+        st.error(f"Gagal mengambil data file dari Supabase: {e}")
+        return
+            
+    files_data = files_response.data
+            
+    if not files_data:
+        st.info("File expired atau belum ada file yang diunggah.")
+        return
+
+    st.markdown("### Histori File Anda") # Judul disesuaikan
+            
+    files_df = pd.DataFrame(files_data)
+
+    # --- Transformasi Data agar Sesuai Kolom Target Visual ---
+
+    # 1. Waktu (dari uploaded_at, format YYYY-MM-DD)
+    files_df["uploaded_at_dt"] = pd.to_datetime(files_df["uploaded_at"])
+    files_df["Waktu"] = files_df["uploaded_at_dt"].dt.strftime('%Y-%m-%d')
+
+    # 2. Aksi (statis untuk konteks ini)
+    files_df["Status"] = "File Tersedia" 
+
+    # 3. Nama File (langsung dari filename)
+    files_df["Nama File"] = files_df["filename"]
+
+    # 4. Ukuran Awal (MB) (dari filesize)
+    # Asumsi 'filesize' adalah dalam MB. Jika tidak, konversi dulu.
+    # Pastikan 'filesize' adalah numerik sebelum formatting
+    files_df["filesize_numeric"] = pd.to_numeric(files_df["filesize"], errors='coerce')
+    files_df["Ukuran Awal (MB)"] = files_df["filesize_numeric"].apply(
+        lambda x: f"{x:.2f}" if pd.notnull(x) else "N/A"
+    )
+
+    # 5. Ukuran Akhir (MB) (statis "None" karena tidak relevan untuk daftar file biasa)
+    files_df["Ukuran Akhir (MB)"] = "None"
+    
+    # 7. Link Download (dari public_url)
+    # Kolom ini akan berisi URL asli, akan dikonfigurasi sebagai link di st.dataframe
+    files_df["URL Publik"] = files_df["public_url"]
+    
+    def make_download_link(row):
+        return f'<a href="{row["URL Publik"]}" target="_blank" class="download-link">Download</a>'
+
+    files_df["Download"] = files_df.apply(make_download_link, axis=1)
+
+    tz = files_df["uploaded_at_dt"].dt.tz
+    now_utc = pd.Timestamp.now(tz='UTC')
+    if tz is None: # Jika uploaded_at adalah naive datetime, asumsikan UTC
+        now_localized = now_utc
+    else: # Jika uploaded_at adalah aware datetime, konversi now() ke timezone yang sama
+        now_localized = now_utc.tz_convert(tz)
+    
+    files_df["time_remaining_seconds"] = (files_df["uploaded_at_dt"] + pd.Timedelta(hours=1) - now_localized).dt.total_seconds()
+    def format_time_remaining(seconds):
+        if seconds < 0: return "Expired"
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        return f"{minutes}m {secs}d"
+    files_df["Sisa Waktu"] = files_df["time_remaining_seconds"].apply(format_time_remaining)
+
+
+    # --- Pilih Kolom yang Akan Ditampilkan Sesuai Urutan Gambar ---
+    # Indeks DataFrame akan otomatis muncul seperti di gambar.
+    display_df = files_df[[
+        "Waktu", 
+        "Status",
+        "Sisa Waktu", 
+        "Nama File", 
+        "URL Publik",
+    ]]
+    
+    # Tampilkan menggunakan st.dataframe dengan konfigurasi kolom
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        column_config={
+            "URL Publik": st.column_config.LinkColumn(
+                "URL",  # Label untuk kolom di tabel UI
+                help="Klik untuk mengunduh file", # Tooltip
+                display_text="Buka" # Teks yang akan muncul sebagai link di setiap baris
+            )
+            # Jika ingin mengkonfigurasi kolom lain, tambahkan di sini
+            # "Ukuran Awal (MB)": st.column_config.NumberColumn(format="%.2f MB"),
+        },
+        hide_index=False # Gambar referensi menampilkan indeks, jadi jangan disembunyikan
+    )
+    st.caption("*) File akan dihapus otomatis setelah 1 jam dari waktu unggah.")
+    
 def show_login_page():
     st.markdown("""
         <style>
