@@ -952,7 +952,7 @@ def show_uploaded_files():
 
     # 1. Waktu (dari uploaded_at, format YYYY-MM-DD)
     files_df["uploaded_at_dt"] = pd.to_datetime(files_df["uploaded_at"])
-    files_df["Waktu"] = files_df["uploaded_at"].dt.strftime('%Y-%m-%d %H:%M:%S %Z')
+    files_df["Waktu"] = files_df["uploaded_at_dt"].dt.strftime('%Y-%m-%d %H:%M:%S %Z')
 
     # 2. Aksi (statis untuk konteks ini)
     files_df["Status"] = "File Tersedia" 
