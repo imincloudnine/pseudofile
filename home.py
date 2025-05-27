@@ -1004,6 +1004,7 @@ def show_uploaded_files():
         "Sisa Waktu", 
         "Nama File", 
         "URL Publik",
+        "Download"
     ]]
     
     # Tampilkan menggunakan st.dataframe dengan konfigurasi kolom
