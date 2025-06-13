@@ -1585,5 +1585,5 @@ def main():
         show_landing_page()
         powered_by()
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
