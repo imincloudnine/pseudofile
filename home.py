@@ -16,6 +16,8 @@ import time
 import pandas as pd
 from dotenv import load_dotenv
 import json
+import fitz  
+import io
 
 # Load environment variables
 load_dotenv()
@@ -586,25 +588,49 @@ def log_user_activity(user_id, email, action, activity_type, filename, file_size
         return False
 
 def compress_pdf(input_path, output_path, user_id, email, original_filename):
-    """Compress PDF file"""
     try:
+        # Hitung ukuran file input (dalam MB)
         input_file_size = os.path.getsize(input_path) / (1024 * 1024)
 
-        reader = PdfReader(input_path)
-        writer = PdfWriter()
+        # Buka PDF dengan PyMuPDF
+        doc = fitz.open(input_path)
         
-        for page in reader.pages:
-            writer.add_page(page)
-        
-        # Add compression
-        writer.add_metadata({})
-        
-        with open(output_path, "wb") as f:
-            writer.write(f)
+        # Kompresi gambar dalam PDF
+        for page in doc:
+            # Dapatkan semua gambar di halaman
+            image_list = page.get_images()
+            
+            for img_index, img in enumerate(image_list):
+                xref = img[0]
+                base_image = doc.extract_image(xref)
+                image_bytes = base_image["image"]
+                
+                # Buka gambar dengan PIL
+                image = Image.open(io.BytesIO(image_bytes))
+                
+                # Kompres gambar
+                if image.mode in ['RGBA', 'LA']:
+                    background = Image.new('RGB', image.size, (255, 255, 255))
+                    background.paste(image, mask=image.split()[-1])
+                    image = background
+                
+                # Simpan gambar yang sudah dikompres
+                img_byte_arr = io.BytesIO()
+                image.save(img_byte_arr, format='JPEG', quality=35, optimize=True)
+                img_byte_arr = img_byte_arr.getvalue()
+                
+                # Ganti gambar asli dengan yang sudah dikompres
+                doc.update_stream(xref, img_byte_arr)
 
+        # Simpan PDF yang sudah dikompres
+        doc.save(output_path, garbage=4, deflate=True, clean=True)
+        doc.close()
+
+        # Hitung ukuran hasil kompresi (dalam MB)
         result_file_size = os.path.getsize(output_path) / (1024 * 1024)
-        billing_amount = int(input_file_size * 1000)
+        billing_amount = int(input_file_size * 1000)  # 100 coin per MB
 
+        # Log aktivitas
         if log_user_activity(
             user_id=user_id,
             email=email,
@@ -618,7 +644,7 @@ def compress_pdf(input_path, output_path, user_id, email, original_filename):
             return True, billing_amount
         return False, 0
     except Exception as e:
-        st.error(f"Failed to compress PDF: {e}")
+        st.error(f"Gagal mengompres PDF: {e}")
         return False, 0
 
 def merge_pdf(input_files, output_path, user_id, email):
