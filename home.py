@@ -12,6 +12,8 @@ import uuid
 from datetime import datetime
 import os
 from dotenv import load_dotenv
+import fitz  
+import io
 
 # Supabase setup
 # Load dari .env
@@ -128,15 +130,39 @@ def compress_pdf(input_path, output_path, user_id, email, original_filename):
         # Hitung ukuran file input (dalam MB)
         input_file_size = os.path.getsize(input_path) / (1024 * 1024)
 
-        # Kompresi PDF
-        reader = PdfReader(input_path)
-        writer = PdfWriter()
-        for page in reader.pages:
-            writer.add_page(page)
-        writer.add_metadata({})
+        # Buka PDF dengan PyMuPDF
+        doc = fitz.open(input_path)
+        
+        # Kompresi gambar dalam PDF
+        for page in doc:
+            # Dapatkan semua gambar di halaman
+            image_list = page.get_images()
+            
+            for img_index, img in enumerate(image_list):
+                xref = img[0]
+                base_image = doc.extract_image(xref)
+                image_bytes = base_image["image"]
+                
+                # Buka gambar dengan PIL
+                image = Image.open(io.BytesIO(image_bytes))
+                
+                # Kompres gambar
+                if image.mode in ['RGBA', 'LA']:
+                    background = Image.new('RGB', image.size, (255, 255, 255))
+                    background.paste(image, mask=image.split()[-1])
+                    image = background
+                
+                # Simpan gambar yang sudah dikompres
+                img_byte_arr = io.BytesIO()
+                image.save(img_byte_arr, format='JPEG', quality=35, optimize=True)
+                img_byte_arr = img_byte_arr.getvalue()
+                
+                # Ganti gambar asli dengan yang sudah dikompres
+                doc.update_stream(xref, img_byte_arr)
 
-        with open(output_path, "wb") as f:
-            writer.write(f)
+        # Simpan PDF yang sudah dikompres
+        doc.save(output_path, garbage=4, deflate=True, clean=True)
+        doc.close()
 
         # Hitung ukuran hasil kompresi (dalam MB)
         result_file_size = os.path.getsize(output_path) / (1024 * 1024)
