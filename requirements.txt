@@ -7,3 +7,4 @@ docx2pdf
 streamlit-option-menu
 pdf2docx
 python-dotenv
+PyMuPDF
